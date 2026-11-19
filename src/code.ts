@@ -142,10 +142,17 @@ function report(ctx: Ctx, node: SceneNode, path: string[], rule: RuleId, detail:
 }
 
 // ---------------------------------------------------------------------------
-// 규칙 1: Auto Layout이 아닌 프레임
+// 규칙 1: Auto Layout이 아닌 프레임 + "Auto Layout 무시"가 켜진 자식
 // ---------------------------------------------------------------------------
 
 function checkAutoLayout(node: SceneNode, path: string[], ctx: Ctx) {
+  // Auto Layout 부모 안에서 "Auto Layout 무시"(절대 위치)가 켜진 자식도 코드에선 absolute가 됨
+  if ('layoutPositioning' in node && node.layoutPositioning === 'ABSOLUTE') {
+    const parent = node.parent;
+    const parentName = parent && 'name' in parent ? parent.name : '';
+    report(ctx, node, path, 'no-autolayout', `"Auto Layout 무시" 켜짐: 부모 "${parentName}" 안에서 절대 위치`);
+  }
+
   if (node.type !== 'FRAME' && node.type !== 'COMPONENT') return;
   if (node.layoutMode !== 'NONE') return;
   const n = node.children.length;

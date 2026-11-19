@@ -4,7 +4,7 @@
 
 | 규칙 | 판별 방법 (Plugin API) | 왜 문제인가 |
 |---|---|---|
-| Auto Layout 없음 | `FRAME`/`COMPONENT`이면서 `layoutMode === 'NONE'`이고 자식이 있음 | 코드에서 absolute 배치가 되어 반응형이 깨짐 |
+| Auto Layout 미적용 | ① `FRAME`/`COMPONENT`이면서 `layoutMode === 'NONE'`이고 자식이 있음<br>② "Auto Layout 무시"가 켜진 자식 (`layoutPositioning === 'ABSOLUTE'`) | 코드에서 absolute 배치가 되어 반응형이 깨짐 |
 | 토큰 없는 색 | SOLID 채우기·선이 `boundVariables.color`도 없고 `fillStyleId`/`strokeStyleId`도 없음 | 테마나 다크모드 변경이 반영되지 않음 |
 | Detach된 인스턴스 | `FrameNode.detachedInfo !== null` | 컴포넌트 업데이트가 전파되지 않고 코드 컴포넌트와 매핑되지 않음 |
 | 기본 레이어명 | `Frame 12`, `Group 3` 같은 이름 (정규식 `DEFAULT_NAME`) | 생성된 코드의 클래스·컴포넌트 이름이 의미를 잃음 |
@@ -35,6 +35,7 @@ dist/code.js    빌드 결과 (esbuild)
 
 - **인스턴스 내부는 검사하지 않습니다.** 인스턴스 안의 문제는 메인 컴포넌트에서 한 번만 리포트합니다.
 - 기본 레이어명 검사는 기본적으로 **컨테이너(Frame, Group, Section, Component)** 만 대상입니다. 아이콘 내부의 `Vector` 같은 도형까지 보려면 "도형 이름까지 검사"를 켭니다.
+- "Auto Layout 무시"는 배지·오버레이처럼 의도적으로 쓰는 경우도 있습니다. 리포트를 보고 의도된 것인지 판단합니다.
 - 색 검사는 SOLID만 대상입니다. 그라디언트와 그림자(effect) 색은 아직 검사하지 않습니다.
 - `DEFAULT_NAME`은 영문 UI의 기본 이름 기준입니다. 다른 언어 UI를 쓰면 `src/code.ts`에 해당 이름을 추가합니다.
 
