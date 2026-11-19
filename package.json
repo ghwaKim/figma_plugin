@@ -1,0 +1,17 @@
+{
+  "name": "design-lint-for-handoff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "코드 변환 품질을 떨어뜨리는 요소(Auto Layout 미사용, 하드코딩 색, detach된 인스턴스, 기본 레이어명)를 찾아 리포트하는 Figma 플러그인",
+  "scripts": {
+    "build": "npm run typecheck && npm run bundle",
+    "bundle": "esbuild src/code.ts --bundle --target=es2017 --outfile=dist/code.js",
+    "watch": "esbuild src/code.ts --bundle --target=es2017 --outfile=dist/code.js --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "^1.142.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
