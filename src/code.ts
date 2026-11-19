@@ -71,11 +71,13 @@ interface Ctx {
   scanned: number;
   page: string;
   componentNames: Map<string, string>;
+  // 인스턴스 내부 리포트를 원본 노드 기준으로 묶기 위한 맵 (같은 컴포넌트 인스턴스가 여러 개여도 한 줄)
+  instanceAbsolute: Map<string, { issue: Issue; base: string; count: number }>;
 }
 
 async function scan(opts: ScanOptions) {
   const started = Date.now();
-  const ctx: Ctx = { opts, issues: [], scanned: 0, page: '', componentNames: new Map() };
+  const ctx: Ctx = { opts, issues: [], scanned: 0, page: '', componentNames: new Map(), instanceAbsolute: new Map() };
 
   let targets: { page: PageNode; nodes: readonly SceneNode[] }[];
   if (opts.scope === 'selection') {
@@ -97,7 +99,8 @@ async function scan(opts: ScanOptions) {
   return { issues: ctx.issues, scanned: ctx.scanned, durationMs: Date.now() - started, scope: opts.scope };
 }
 
-async function visit(node: SceneNode, path: string[], ctx: Ctx): Promise<void> {
+// instance: 지금 인스턴스 내부를 돌고 있다면 가장 바깥 인스턴스
+async function visit(node: SceneNode, path: string[], ctx: Ctx, instance: InstanceNode | null = null): Promise<void> {
   if (!ctx.opts.includeHidden && !node.visible) return;
 
   ctx.scanned++;
@@ -106,16 +109,21 @@ async function visit(node: SceneNode, path: string[], ctx: Ctx): Promise<void> {
     await new Promise((r) => setTimeout(r, 0)); // UI가 진행 상황을 그릴 틈을 줌
   }
 
-  checkAutoLayout(node, path, ctx);
-  checkColors(node, path, ctx);
-  await checkDetached(node, path, ctx);
-  checkDefaultName(node, path, ctx);
+  if (instance) {
+    // 인스턴스 내부: 색·이름 등은 메인 컴포넌트의 책임이라 건너뛰고,
+    // 화면 레이아웃에 그대로 드러나는 "Auto Layout 무시"만 검사
+    checkAbsoluteInInstance(node, path, ctx, instance);
+  } else {
+    checkAutoLayout(node, path, ctx);
+    checkColors(node, path, ctx);
+    await checkDetached(node, path, ctx);
+    checkDefaultName(node, path, ctx);
+  }
 
-  // 인스턴스 내부는 메인 컴포넌트의 책임이므로 들어가지 않음 (컴포넌트 쪽에서 한 번만 리포트)
-  if (node.type === 'INSTANCE') return;
   if ('children' in node) {
     const childPath = [...path, node.name];
-    for (const child of node.children) await visit(child, childPath, ctx);
+    const inside = instance || (node.type === 'INSTANCE' ? node : null);
+    for (const child of node.children) await visit(child, childPath, ctx, inside);
   }
 }
 
@@ -145,13 +153,33 @@ function report(ctx: Ctx, node: SceneNode, path: string[], rule: RuleId, detail:
 // 규칙 1: Auto Layout이 아닌 프레임 + "Auto Layout 무시"가 켜진 자식
 // ---------------------------------------------------------------------------
 
-function checkAutoLayout(node: SceneNode, path: string[], ctx: Ctx) {
-  // Auto Layout 부모 안에서 "Auto Layout 무시"(절대 위치)가 켜진 자식도 코드에선 absolute가 됨
-  if ('layoutPositioning' in node && node.layoutPositioning === 'ABSOLUTE') {
-    const parent = node.parent;
-    const parentName = parent && 'name' in parent ? parent.name : '';
-    report(ctx, node, path, 'no-autolayout', `"Auto Layout 무시" 켜짐: 부모 "${parentName}" 안에서 절대 위치`);
+// Auto Layout 부모 안에서 "Auto Layout 무시"(절대 위치)가 켜진 자식도 코드에선 absolute가 됨
+function absoluteDetail(node: SceneNode): string | null {
+  if (!('layoutPositioning' in node) || node.layoutPositioning !== 'ABSOLUTE') return null;
+  const parent = node.parent;
+  const parentName = parent && 'name' in parent ? parent.name : '';
+  return `"Auto Layout 무시" 켜짐: 부모 "${parentName}" 안에서 절대 위치`;
+}
+
+function checkAbsoluteInInstance(node: SceneNode, path: string[], ctx: Ctx, instance: InstanceNode) {
+  const detail = absoluteDetail(node);
+  if (!detail) return;
+  // 인스턴스 하위 노드 id는 "I<인스턴스>;<원본 노드>" 형태 → 마지막 조각이 컴포넌트 안의 원본 노드
+  const sourceId = node.id.split(';').pop() || node.id;
+  const seen = ctx.instanceAbsolute.get(sourceId);
+  if (seen) {
+    seen.count++;
+    seen.issue.detail = `${seen.base} (같은 컴포넌트 인스턴스 ${seen.count}곳)`;
+    return;
   }
+  const base = `${detail} · 인스턴스 "${instance.name}" 내부`;
+  report(ctx, node, path, 'no-autolayout', base);
+  ctx.instanceAbsolute.set(sourceId, { issue: ctx.issues[ctx.issues.length - 1], base, count: 1 });
+}
+
+function checkAutoLayout(node: SceneNode, path: string[], ctx: Ctx) {
+  const absolute = absoluteDetail(node);
+  if (absolute) report(ctx, node, path, 'no-autolayout', absolute);
 
   if (node.type !== 'FRAME' && node.type !== 'COMPONENT') return;
   if (node.layoutMode !== 'NONE') return;
