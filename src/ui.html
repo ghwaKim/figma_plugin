@@ -6,10 +6,13 @@
     --hover: var(--figma-color-bg-hover, #f0f0f0);
     --text: var(--figma-color-text, #1e1e1e);
     --text2: var(--figma-color-text-secondary, #757575);
+    --text3: var(--figma-color-text-tertiary, #b3b3b3);
     --border: var(--figma-color-border, #e6e6e6);
     --brand: var(--figma-color-bg-brand, #0d99ff);
     --onbrand: var(--figma-color-text-onbrand, #fff);
     --selected: var(--figma-color-bg-selected, #e5f4ff);
+    --danger: var(--figma-color-text-danger, #f24822);
+    --warn-bg: var(--figma-color-bg-warning, #ffc21a);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; }
@@ -20,41 +23,54 @@
   }
   header { padding: 12px; border-bottom: 1px solid var(--border); display: grid; gap: 8px; }
   .row { display: flex; gap: 8px; align-items: center; }
-  select, button {
+  select, button, input[type="text"] {
     font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px;
   }
   select { flex: 1; }
-  button { cursor: pointer; }
-  button:hover { background: var(--hover); }
+  button { cursor: pointer; white-space: nowrap; }
+  button:hover:not(:disabled) { background: var(--hover); }
+  button:disabled { opacity: .5; cursor: default; }
   button.primary { background: var(--brand); color: var(--onbrand); border-color: transparent; font-weight: 600; }
-  button.primary:disabled { opacity: .5; cursor: default; }
-  .options { color: var(--text2); gap: 14px; }
+  button.primary:hover:not(:disabled) { background: var(--brand); filter: brightness(1.08); }
+  button.small { padding: 3px 8px; font-size: 11px; }
+  button.ghost { border-color: transparent; color: var(--text2); }
+  button.danger { border-color: var(--danger); color: var(--danger); }
+  .options { color: var(--text2); gap: 14px; flex-wrap: wrap; }
   .options label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
 
   nav { display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--border); overflow-x: auto; }
-  nav button { border-radius: 999px; padding: 3px 10px; white-space: nowrap; color: var(--text2); }
+  nav:empty { display: none; }
+  nav button { border-radius: 999px; padding: 3px 10px; color: var(--text2); }
   nav button.active { background: var(--selected); color: var(--text); border-color: var(--brand); }
   nav .n { font-weight: 600; margin-left: 4px; color: var(--text); }
 
   main { flex: 1; overflow-y: auto; }
   .empty { padding: 40px 24px; text-align: center; color: var(--text2); }
   .group h3 {
-    position: sticky; top: 0; margin: 0; padding: 8px 12px 6px;
+    position: sticky; top: 0; z-index: 1; margin: 0; padding: 8px 12px 6px;
     background: var(--bg2); font-size: 12px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: flex-start;
   }
+  .group h3 .title { flex: 1; }
   .group h3 small { display: block; font-weight: 400; color: var(--text2); }
   .item { padding: 8px 12px; border-bottom: 1px solid var(--border); cursor: pointer; }
   .item:hover { background: var(--hover); }
   .item.active { background: var(--selected); }
-  .item .name { font-weight: 600; }
-  .item .detail { color: var(--text); }
+  .item.ignored { opacity: .55; }
+  .item .name { font-weight: 600; display: flex; gap: 6px; align-items: center; }
+  .item .badge { font-size: 10px; font-weight: 500; color: var(--text2); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
   .item .path { color: var(--text2); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item .error { color: var(--danger); font-size: 11px; margin-top: 2px; }
+  .actions { display: flex; gap: 6px; margin-top: 6px; align-items: center; cursor: default; }
+  .actions input[type="text"] { flex: 1; min-width: 0; padding: 3px 8px; font-size: 11px; }
+  .actions .spacer { flex: 1; }
 
   footer {
     display: flex; justify-content: space-between; align-items: center; gap: 8px;
     padding: 8px 12px; border-top: 1px solid var(--border); color: var(--text2);
   }
+  #banner { display: none; padding: 6px 12px; background: var(--bg2); color: var(--text2); border-bottom: 1px solid var(--border); }
 </style>
 
 <header>
@@ -69,8 +85,10 @@
   <div class="row options">
     <label><input type="checkbox" id="hidden" /> 숨긴 레이어 포함</label>
     <label><input type="checkbox" id="shapes" /> 도형 이름까지 검사</label>
+    <label><input type="checkbox" id="showIgnored" /> 무시한 항목 보기</label>
   </div>
 </header>
+<div id="banner">Dev Mode에서는 검사와 이동만 할 수 있어요. 수정·무시는 디자인 모드에서 실행해 주세요.</div>
 
 <nav id="tabs"></nav>
 <main id="list"><div class="empty">범위를 고르고 <b>검사</b>를 눌러 주세요.</div></main>
@@ -104,35 +122,31 @@
   const send = (msg) => parent.postMessage({ pluginMessage: msg }, '*');
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  let issues = [];
+  let readOnly = false;
+  let issues = []; // 각 항목에 uid(고유 번호), busy, error 상태를 덧붙여 관리
   let filter = 'all';
-  let activeId = null;
+  let activeUid = null;
   let lastMeta = null;
+  let confirmUid = null; // "원본으로 교체" 2단계 확인 중인 항목
+  let confirmTimer = null;
+
+  const byUid = (uid) => issues.find((i) => i.uid === uid);
+  const visible = () => issues.filter((i) => $('showIgnored').checked || !i.ignored);
+
+  // ---------------------------------------------------------------- 이벤트
 
   $('run').onclick = () => {
     $('run').disabled = true;
     $('copy').disabled = true;
     $('status').textContent = '검사 중…';
-    send({
-      type: 'scan',
-      scope: $('scope').value,
-      includeHidden: $('hidden').checked,
-      includeShapes: $('shapes').checked,
-    });
+    send({ type: 'scan', scope: $('scope').value, includeHidden: $('hidden').checked, includeShapes: $('shapes').checked });
   };
+
+  $('showIgnored').onchange = () => render();
 
   $('copy').onclick = () => {
     const ok = copyText(toMarkdown());
     send({ type: 'notify', message: ok ? '리포트를 Markdown으로 복사했어요.' : '복사에 실패했어요.' });
-  };
-
-  $('list').onclick = (e) => {
-    const el = e.target.closest('.item');
-    if (!el) return;
-    activeId = el.dataset.id;
-    document.querySelectorAll('.item.active').forEach((n) => n.classList.remove('active'));
-    el.classList.add('active');
-    send({ type: 'select', id: activeId });
   };
 
   $('tabs').onclick = (e) => {
@@ -142,41 +156,142 @@
     render();
   };
 
-  onmessage = (e) => {
-    const msg = e.data.pluginMessage;
-    if (!msg) return;
-    if (msg.type === 'selection') {
-      $('scope').options[0].textContent = msg.count ? `선택 영역 (${msg.count}개)` : '선택 영역';
-    } else if (msg.type === 'progress') {
-      $('status').textContent = `검사 중… ${msg.scanned.toLocaleString()}개 레이어`;
-    } else if (msg.type === 'result') {
-      issues = msg.issues;
-      lastMeta = msg;
-      filter = 'all';
-      activeId = null;
-      $('run').disabled = false;
-      $('copy').disabled = issues.length === 0;
-      $('status').textContent =
-        `${SCOPE_LABEL[msg.scope]} · 레이어 ${msg.scanned.toLocaleString()}개 · 문제 ${issues.length}건 · ${(msg.durationMs / 1000).toFixed(1)}초`;
-      render();
-    } else if (msg.type === 'error') {
-      $('run').disabled = false;
-      $('status').textContent = '';
-      $('list').innerHTML = `<div class="empty">${esc(msg.message)}</div>`;
+  $('list').onclick = (e) => {
+    const actionBtn = e.target.closest('[data-act]');
+    if (actionBtn) return onAction(actionBtn);
+    if (e.target.closest('.actions, h3')) return; // 입력창·버튼 영역 클릭은 이동하지 않음
+    const el = e.target.closest('.item');
+    if (!el) return;
+    activeUid = Number(el.dataset.uid);
+    document.querySelectorAll('.item.active').forEach((n) => n.classList.remove('active'));
+    el.classList.add('active');
+    send({ type: 'select', id: byUid(activeUid).id });
+  };
+
+  // 다시 그려도 입력 중인 이름이 사라지지 않도록 상태에 저장
+  $('list').oninput = (e) => {
+    if (!e.target.matches('.actions input')) return;
+    const issue = byUid(Number(e.target.closest('.item').dataset.uid));
+    if (issue && issue.fix) issue.fix.suggestion = e.target.value;
+  };
+
+  $('list').onkeydown = (e) => {
+    if (e.key === 'Enter' && e.target.matches('.actions input')) {
+      const btn = e.target.parentElement.querySelector('[data-act="rename"]');
+      if (btn) onAction(btn);
     }
   };
 
-  function render() {
-    const counts = {};
-    for (const i of issues) counts[i.rule] = (counts[i.rule] || 0) + 1;
+  function onAction(btn) {
+    const act = btn.dataset.act;
 
-    const tabs = [['all', '전체', issues.length], ...Object.keys(RULES).map((r) => [r, RULES[r].label, counts[r] || 0])];
+    if (act === 'fix-all-colors') {
+      const items = visible().filter((i) => i.rule === 'hardcoded-color' && !i.ignored && i.fix && !i.busy);
+      items.forEach((i) => { i.busy = true; i.error = null; });
+      send({ type: 'fix-all-colors', items: items.map((i) => ({ uid: i.uid, id: i.id })) });
+      return render();
+    }
+
+    const issue = byUid(Number(btn.closest('.item').dataset.uid));
+    if (!issue || issue.busy) return;
+
+    if (act === 'ignore' || act === 'unignore') {
+      send({ type: 'ignore', key: issue.key, rule: issue.rule, ignored: act === 'ignore' });
+      return;
+    }
+
+    if (act === 'replace' && confirmUid !== issue.uid) {
+      // 레이어를 지우고 새로 만드는 수정이라 한 번 더 확인
+      confirmUid = issue.uid;
+      clearTimeout(confirmTimer);
+      confirmTimer = setTimeout(() => { confirmUid = null; render(); }, 4000);
+      return render();
+    }
+    confirmUid = null;
+
+    let value;
+    if (act === 'rename') value = btn.parentElement.querySelector('input').value;
+    issue.busy = true;
+    issue.error = null;
+    send({ type: 'fix', uid: issue.uid, id: issue.id, kind: issue.fix.kind, value });
+    render();
+  }
+
+  // ---------------------------------------------------------------- code.ts → UI
+
+  onmessage = (e) => {
+    const msg = e.data.pluginMessage;
+    if (!msg) return;
+    switch (msg.type) {
+      case 'init':
+        readOnly = msg.readOnly;
+        $('banner').style.display = readOnly ? 'block' : 'none';
+        break;
+      case 'selection':
+        $('scope').options[0].textContent = msg.count ? `선택 영역 (${msg.count}개)` : '선택 영역';
+        break;
+      case 'progress':
+        $('status').textContent = `검사 중… ${msg.scanned.toLocaleString()}개 레이어`;
+        break;
+      case 'result':
+        issues = msg.issues.map((i, n) => ({ ...i, uid: n }));
+        lastMeta = msg;
+        filter = 'all';
+        activeUid = null;
+        $('run').disabled = false;
+        render();
+        break;
+      case 'error':
+        $('run').disabled = false;
+        $('status').textContent = '';
+        $('list').innerHTML = `<div class="empty">${esc(msg.message)}</div>`;
+        break;
+      case 'fixed': {
+        // update가 null이면 해결됨 → 목록에서 제거, 아니면 남은 문제로 갱신
+        const issue = byUid(msg.uid);
+        if (!issue) break;
+        if (msg.update) Object.assign(issue, { detail: msg.update.detail, fix: msg.update.fix, busy: false });
+        else issues = issues.filter((i) => i.uid !== msg.uid);
+        render();
+        break;
+      }
+      case 'fix-failed': {
+        const issue = byUid(msg.uid);
+        if (issue) Object.assign(issue, { busy: false, error: msg.message });
+        render();
+        break;
+      }
+      case 'ignored':
+        // 같은 키(예: 같은 컴포넌트 원본)를 공유하는 항목 모두에 반영
+        issues.forEach((i) => { if (i.key === msg.key && i.rule === msg.rule) i.ignored = msg.ignored; });
+        render();
+        break;
+    }
+  };
+
+  // ---------------------------------------------------------------- 렌더링
+
+  function render() {
+    const active = issues.filter((i) => !i.ignored);
+    const ignoredCount = issues.length - active.length;
+    const counts = {};
+    for (const i of active) counts[i.rule] = (counts[i.rule] || 0) + 1;
+
+    if (lastMeta) {
+      $('status').textContent =
+        `${SCOPE_LABEL[lastMeta.scope]} · 레이어 ${lastMeta.scanned.toLocaleString()}개 · 문제 ${active.length}건` +
+        (ignoredCount ? ` · 무시 ${ignoredCount}건` : '');
+    }
+    $('copy').disabled = active.length === 0;
+
+    const tabs = [['all', '전체', active.length], ...Object.keys(RULES).map((r) => [r, RULES[r].label, counts[r] || 0])];
     $('tabs').innerHTML = tabs
       .map(([r, label, n]) => `<button data-rule="${r}" class="${filter === r ? 'active' : ''}">${label}<span class="n">${n}</span></button>`)
       .join('');
 
-    if (issues.length === 0) {
-      $('list').innerHTML = '<div class="empty">🎉 발견된 문제가 없습니다.</div>';
+    const shown = visible();
+    if (shown.length === 0) {
+      $('list').innerHTML = `<div class="empty">🎉 발견된 문제가 없습니다.${ignoredCount ? `<br>(무시한 항목 ${ignoredCount}건은 "무시한 항목 보기"로 확인)` : ''}</div>`;
       return;
     }
 
@@ -184,27 +299,54 @@
     const multiPage = new Set(issues.map((i) => i.page)).size > 1;
     let html = '';
     for (const r of rules) {
-      const list = issues.filter((i) => i.rule === r);
+      const list = shown.filter((i) => i.rule === r);
       if (list.length === 0) continue;
-      html += `<section class="group"><h3>${RULES[r].label} · ${list.length}<small>${RULES[r].why}</small></h3>`;
-      for (const i of list) {
-        const path = [multiPage ? i.page : null, i.path].filter(Boolean).join(' / ');
-        html += `<div class="item ${i.id === activeId ? 'active' : ''}" data-id="${esc(i.id)}">
-          <div class="name">${esc(i.name)}</div>
-          <div class="detail">${esc(i.detail)}</div>
-          ${path ? `<div class="path">${esc(path)}</div>` : ''}
-        </div>`;
-      }
+      const bulk = r === 'hardcoded-color' && !readOnly ? list.filter((i) => !i.ignored && i.fix).length : 0;
+      html += `<section class="group"><h3><span class="title">${RULES[r].label} · ${list.filter((i) => !i.ignored).length}<small>${RULES[r].why}</small></span>
+        ${bulk ? `<button class="small" data-act="fix-all-colors">일치하는 색 모두 연결 (${bulk})</button>` : ''}</h3>`;
+      for (const i of list) html += renderItem(i, multiPage);
       html += '</section>';
     }
     $('list').innerHTML = html || '<div class="empty">이 항목에는 문제가 없습니다.</div>';
   }
 
+  function renderItem(i, multiPage) {
+    const path = [multiPage ? i.page : null, i.path].filter(Boolean).join(' / ');
+    return `<div class="item ${i.uid === activeUid ? 'active' : ''} ${i.ignored ? 'ignored' : ''}" data-uid="${i.uid}">
+      <div class="name">${esc(i.name)}${i.ignored ? '<span class="badge">무시됨</span>' : ''}</div>
+      <div class="detail">${esc(i.detail)}</div>
+      ${path ? `<div class="path">${esc(path)}</div>` : ''}
+      ${i.error ? `<div class="error">${esc(i.error)}</div>` : ''}
+      ${readOnly ? '' : renderActions(i)}
+    </div>`;
+  }
+
+  function renderActions(i) {
+    if (i.ignored) return `<div class="actions"><span class="spacer"></span><button class="small ghost" data-act="unignore">무시 해제</button></div>`;
+    const dis = i.busy ? 'disabled' : '';
+    let fix = '<span class="spacer"></span>';
+    if (i.fix && i.fix.kind === 'rename') {
+      fix = `<input type="text" value="${esc(i.fix.suggestion || '')}" placeholder="새 이름" ${dis} />
+             <button class="small" data-act="rename" ${dis}>${i.busy ? '변경 중…' : '이름 변경'}</button>`;
+    } else if (i.fix && i.fix.kind === 'bind-color') {
+      fix = `<button class="small" data-act="fix" ${dis}>${i.busy ? '연결 중…' : esc(i.fix.label)}</button><span class="spacer"></span>`;
+    } else if (i.fix && i.fix.kind === 'replace-detached') {
+      const confirming = confirmUid === i.uid;
+      fix = `<button class="small ${confirming ? 'danger' : ''}" data-act="replace" ${dis}>${
+        i.busy ? '교체 중…' : confirming ? '한 번 더 눌러 교체' : '원본으로 교체'
+      }</button><span class="spacer"></span>`;
+    }
+    return `<div class="actions">${fix}<button class="small ghost" data-act="ignore" ${dis} title="의도된 경우 다음 검사부터 제외">무시</button></div>`;
+  }
+
+  // ---------------------------------------------------------------- 내보내기
+
   function toMarkdown() {
+    const active = issues.filter((i) => !i.ignored);
     const lines = [`# Handoff Lint 리포트`, ''];
-    if (lastMeta) lines.push(`- 범위: ${SCOPE_LABEL[lastMeta.scope]}`, `- 검사한 레이어: ${lastMeta.scanned}개`, `- 문제: ${issues.length}건`, '');
+    if (lastMeta) lines.push(`- 범위: ${SCOPE_LABEL[lastMeta.scope]}`, `- 검사한 레이어: ${lastMeta.scanned}개`, `- 문제: ${active.length}건`, '');
     for (const r of Object.keys(RULES)) {
-      const list = issues.filter((i) => i.rule === r);
+      const list = active.filter((i) => i.rule === r);
       if (list.length === 0) continue;
       lines.push(`## ${RULES[r].label} (${list.length})`, `> ${RULES[r].why}`, '');
       for (const i of list) {
